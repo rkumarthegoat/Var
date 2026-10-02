@@ -1,0 +1,68 @@
+---
+title: "Did VAR change how soccer is played? A natural experiment across nine European leagues"
+format:
+  html:
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+jupyter: python3
+---
+
+## The question
+
+Video assistant referees (VAR) arrived in Europe's top leagues in different seasons, which turns the rollout into a natural experiment. A league deciding whether to adopt the technology would want to know if it changes what happens on the pitch. This report asks whether VAR changed goals scored, the home team's advantage, fouls, or cards in a league's matches.
+
+## Data
+
+The data are match results from football-data.co.uk for nine leagues across the 2011 to 2012 through 2021 to 2022 seasons, roughly 32,000 matches in total. Each league's first full VAR season is shown below. Scotland adopted VAR in 2022, after the data ends, so it serves purely as a comparison league. Belgium and Greece were left out because their rollouts were gradual or unclear, which would blur the line between treated and untreated seasons. Fouls and cards are missing for about half of the matches in the Eredivisie, Primeira Liga, and Super Lig, so those outcomes use only the six leagues with complete data, while goals and home margin use all nine.
+
+```{python}
+#| output: asis
+import duckdb
+import pandas as pd
+
+con = duckdb.connect("data/processed/var.duckdb", read_only=True)
+tbl = con.execute("""
+SELECT league AS League,
+       CASE WHEN var_start > 2021 THEN 'After 2021 to 2022 (comparison only)'
+            ELSE CAST(var_start AS VARCHAR) || ' to ' || CAST(var_start + 1 AS VARCHAR) END AS "First VAR season",
+       COUNT(*) AS Matches
+FROM matches
+GROUP BY league, var_start
+ORDER BY var_start, league
+""").df()
+print(tbl.to_markdown(index=False))
+```
+
+## Method
+
+Because leagues adopted VAR in different seasons, a single before and after comparison can mislead. Instead, I built a stacked design. For each adoption year, the leagues that adopted that year are compared with leagues that had not yet adopted, using five seasons before adoption and the adoption season plus one more after. The models include league and season effects and a control for matches played in empty stadiums.
+
+With so few leagues, the usual confidence intervals are too narrow. To get a more honest measure of uncertainty, I also reshuffled which league received which adoption year 300 times and recorded how often a fake assignment produced an effect as large as the real one. That share is the permutation p value in the table below.
+
+## Results
+
+```{python}
+#| output: asis
+res = pd.read_csv("outputs/results.csv").rename(columns={
+    "outcome": "Outcome", "leagues_used": "Leagues used", "estimate": "Estimate",
+    "ci_low": "CI low", "ci_high": "CI high", "permutation_p": "Permutation p"})
+print(res.to_markdown(index=False))
+```
+
+The estimates are the average change in each outcome in leagues after they adopted VAR, compared with leagues that had not. The figure below shows the same comparison season by season. Each dot is the gap between adopting and comparison leagues relative to the season just before adoption, and the bars are 95 percent confidence intervals. If the design is sound, the dots left of the dotted line should sit near zero.
+
+![Gap between adopting and comparison leagues, in seasons relative to VAR adoption](outputs/event_study.png)
+
+## What this shows
+
+Goals per match show no detectable change, and the dots sit flat both before and after adoption. Home goal margin and cards move slightly, but the changes are small and uncertain enough to be indistinguishable from chance.
+
+Fouls need more care. The table shows a drop, but the figure shows that adopting leagues were already converging toward the comparison leagues for years before VAR arrived, so the drop continues a trend that was already underway. This outcome fails the check that the design depends on, so I do not credit VAR with any change in fouls.
+
+A league considering VAR should not expect a meaningful shift in goals, home advantage, or cards based on this evidence. The data also cannot rule out a moderate effect, since nine leagues give limited statistical power.
+
+## Limitations
+
+Only nine leagues are available, and the leagues that adopted in 2018 and 2019 are compared mainly against Scotland alone, so those results lean heavily on one league. Empty stadium matches are handled with a simple date based indicator. Adoption dates come from public sources and should be treated as carefully checked but not official. The data also contains no penalty counts, even though penalties are the outcome VAR most directly targets, so adding them would be the most valuable extension.
